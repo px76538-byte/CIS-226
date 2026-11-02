@@ -1,1 +1,46 @@
 
+import socket
+from concurrent.futures import ThreadPoolExecutor
+
+def scan_port(ip, port):
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.5)
+            result = sock.connect_ex((ip, port))
+
+            if result == 0:
+                return port
+    except OSError:
+        pass
+
+    return None
+
+
+def scan_computer(ip, start_port=1, end_port=65535):
+    print(f"\nScanning computer: {ip}")
+
+    with ThreadPoolExecutor(max_workers=100) as executor:
+        results = executor.map(
+            lambda port: scan_port(ip, port),
+            range(start_port, end_port + 1)
+        )
+
+        open_ports = [port for port in results if port is not None]
+
+    if open_ports:
+        print("Open TCP ports:")
+        for port in open_ports:
+            print(f"Port {port}: OPEN")
+    else:
+        print("No open TCP ports detected.")
+
+
+computers = input(
+    "Enter IP addresses separated by commas: "
+).split(",")
+
+for computer in computers:
+    ip = computer.strip()
+    if ip:
+        scan_computer(ip)
+
