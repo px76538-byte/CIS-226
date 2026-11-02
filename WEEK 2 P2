@@ -1,0 +1,65 @@
+
+import socket
+import ssl
+
+def grab_banner(ip, port):
+    try:
+        print(f"\nConnecting to {ip} on port {port}...")
+
+        # Create a TCP connection
+        with socket.create_connection((ip, port), timeout=3) as sock:
+            sock.settimeout(3)
+
+            # HTTPS requires an encrypted connection
+            if port == 443:
+                context = ssl.create_default_context()
+                with context.wrap_socket(
+                    sock, server_hostname=ip
+                ) as secure_sock:
+                    return get_http_banner(secure_sock, ip)
+
+            # HTTP servers need a request
+            elif port in (80, 8080):
+                return get_http_banner(sock, ip)
+
+            # Other services may send a greeting
+            else:
+                banner = sock.recv(1024)
+                return banner.decode(
+                    "utf-8", errors="replace"
+                ).strip()
+
+    except Exception as error:
+        return f"Unable to retrieve banner: {error}"
+
+
+def get_http_banner(sock, host):
+    request = (
+        f"HEAD / HTTP/1.1\r\n"
+        f"Host: {host}\r\n"
+        f"Connection: close\r\n\r\n"
+    )
+
+    sock.sendall(request.encode())
+
+    response = sock.recv(4096).decode(
+        "utf-8", errors="replace"
+    )
+
+    # Display HTTP response headers
+    return response.split("\r\n\r\n")[0]
+
+
+# Main program
+ip = input("Enter server IP address or hostname: ")
+port = int(input("Enter port number: "))
+
+print("\n--- Banner Grabber Results ---")
+
+banner = grab_banner(ip, port)
+
+if banner:
+    print("Banner information:")
+    print(banner)
+else:
+    print("Connected, but no banner was received.")
