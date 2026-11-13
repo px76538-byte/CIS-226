@@ -1,0 +1,264 @@
+
+# Vulnerability Scan Results Analyzer - Part 1
+# Python 3.11 - Windows / Spyder
+
+import platform
+import socket
+import subprocess
+import csv
+import json
+from pathlib import Path
+from datetime import datetime
+
+import psutil
+
+
+# Function 1: Collect OS information
+def get_os_info():
+
+    print("\n===== OPERATING SYSTEM INFORMATION =====")
+
+    info = {
+        "Computer Name": socket.gethostname(),
+        "Operating System": platform.system(),
+        "OS Release": platform.release(),
+        "OS Version": platform.version(),
+        "Architecture": platform.machine(),
+        "Processor": platform.processor()
+    }
+
+    for key, value in info.items():
+        print(f"{key}: {value}")
+
+    return info
+
+
+# Function 2: Collect installed hotfix records
+def get_hotfixes():
+
+    print("\n===== INSTALLED WINDOWS HOTFIXES =====")
+
+    hotfixes = []
+
+    # PowerShell queries Windows update records
+    command = [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        (
+            "Get-CimInstance Win32_QuickFixEngineering "
+            "| Select-Object HotFixID, Description, "
+            "InstalledOn "
+            "| ConvertTo-Json -Compress"
+        )
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=45,
+            check=True
+        )
+
+        output = result.stdout.strip()
+
+        if not output:
+            print("No hotfix records returned.")
+            return hotfixes
+
+        data = json.loads(output)
+
+        if isinstance(data, dict):
+            data = [data]
+
+        for item in data:
+
+            hotfix = {
+                "HotFixID": item.get("HotFixID", ""),
+                "Description": item.get("Description", ""),
+                "InstalledOn": item.get("InstalledOn", "")
+            }
+
+            hotfixes.append(hotfix)
+
+            print(
+                hotfix["HotFixID"],
+                hotfix["Description"],
+                hotfix["InstalledOn"]
+            )
+
+    except (
+        subprocess.SubprocessError,
+        OSError,
+        json.JSONDecodeError
+    ) as error:
+
+        print("Unable to retrieve hotfix records:", error)
+
+    return hotfixes
+
+
+# Function 3: Find local listening TCP ports
+def get_listening_ports():
+
+    print("\n===== LOCAL LISTENING TCP PORTS =====")
+
+    ports = []
+
+    try:
+        connections = psutil.net_connections(kind="tcp")
+
+    except (psutil.AccessDenied, OSError) as error:
+        print("Unable to read TCP connections:", error)
+        return ports
+
+    for conn in connections:
+
+        if conn.status != psutil.CONN_LISTEN:
+            continue
+
+        if not conn.laddr:
+            continue
+
+        address = conn.laddr.ip
+        port = conn.laddr.port
+        pid = conn.pid
+
+        process_name = "Unknown"
+
+        if pid is not None:
+            try:
+                process_name = psutil.Process(pid).name()
+
+            except (
+                psutil.NoSuchProcess,
+                psutil.AccessDenied,
+                psutil.ZombieProcess
+            ):
+                pass
+
+        record = {
+            "Local Address": address,
+            "Local Port": port,
+            "PID": pid if pid is not None else "",
+            "Process Name": process_name,
+            "Status": "LISTEN"
+        }
+
+        ports.append(record)
+
+    ports.sort(
+        key=lambda x: (
+            x["Local Port"],
+            x["Local Address"]
+        )
+    )
+
+    for record in ports:
+        print(
+            f"Address: {record['Local Address']} | "
+            f"Port: {record['Local Port']} | "
+            f"Process: {record['Process Name']}"
+        )
+
+    print("Total listening TCP entries:", len(ports))
+
+    return ports
+
+
+# Function 4: Export records to CSV
+def export_csv(filename, records, columns):
+
+    with open(
+        filename,
+        "w",
+        newline="",
+        encoding="utf-8-sig"
+    ) as file:
+
+        writer = csv.DictWriter(
+            file,
+            fieldnames=columns
+        )
+
+        writer.writeheader()
+
+        for record in records:
+            safe_record = {}
+
+            for key in columns:
+                value = str(record.get(key, ""))
+
+                # Prevent spreadsheet formula interpretation
+                if value.lstrip().startswith(
+                    ("=", "+", "-", "@")
+                ):
+                    value = "'" + value
+
+                safe_record[key] = value
+
+            writer.writerow(safe_record)
+
+    print("Saved:", filename)
+
+
+# Function 5: Main program
+def main():
+
+    print("====================================")
+    print(" VULNERABILITY SCAN RESULTS ANALYZER")
+    print(" PART 1 - SYSTEM INFORMATION")
+    print("====================================")
+
+    print("Collection started:",
+          datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+
+    os_info = get_os_info()
+
+    hotfixes = get_hotfixes()
+
+    ports = get_listening_ports()
+
+    # Save output to the current folder
+    output_folder = Path.cwd() / "security_results"
+
+    output_folder.mkdir(exist_ok=True)
+
+    export_csv(
+        output_folder / "os_information.csv",
+        [os_info],
+        list(os_info.keys())
+    )
+
+    export_csv(
+        output_folder / "installed_hotfixes.csv",
+        hotfixes,
+        ["HotFixID", "Description", "InstalledOn"]
+    )
+
+    export_csv(
+        output_folder / "listening_tcp_ports.csv",
+        ports,
+        [
+            "Local Address",
+            "Local Port",
+            "PID",
+            "Process Name",
+            "Status"
+        ]
+    )
+
+    print("\n===== SCAN SUMMARY =====")
+    print("Computer:", os_info["Computer Name"])
+    print("Hotfix records collected:", len(hotfixes))
+    print("Listening TCP entries found:", len(ports))
+
+    print("\nResults saved in:", output_folder)
+    print("Collection completed.")
+
+
+if __name__ == "__main__":
+    main()
