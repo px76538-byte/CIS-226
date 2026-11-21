@@ -1,0 +1,101 @@
+
+import subprocess
+import json
+from datetime import datetime, timezone
+
+# NIST SP 800-53 AC-2 Account Management Check
+INACTIVE_DAYS = 90
+
+
+def run_powershell(command):
+    """Run a PowerShell command and return JSON data."""
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile",
+         "-Command", command],
+        capture_output=True,
+        text=True,
+        check=True
+    )
+
+    if not result.stdout.strip():
+        return []
+
+    data = json.loads(result.stdout)
+
+    return data if isinstance(data, list) else [data]
+
+
+def check_accounts():
+    print("NIST 800-53 AC-2 Compliance Check")
+    print("--------------------------------")
+
+    command = """
+    Get-LocalUser |
+    Select-Object Name, Enabled, LastLogon,
+                  PasswordRequired, SID |
+    ConvertTo-Json
+    """
+
+    accounts = run_powershell(command)
+
+    admin_command = """
+    $group = Get-LocalGroup -SID 'S-1-5-32-544'
+    Get-LocalGroupMember -Group $group.Name |
+    Select-Object -ExpandProperty Name |
+    ConvertTo-Json
+    """
+
+    administrators = run_powershell(admin_command)
+    findings = []
+
+    for account in accounts:
+        name = account["Name"]
+        enabled = account["Enabled"]
+        sid = str(account["SID"])
+
+        print(f"\nAccount: {name}")
+        print(f"Enabled: {enabled}")
+
+        # Check for enabled guest accounts
+        if sid.endswith("-501") and enabled:
+            findings.append(
+                f"WARNING: Guest account {name} is enabled."
+            )
+
+        # Check for accounts without required passwords
+        if enabled and account.get("PasswordRequired") is False:
+            findings.append(
+                f"WARNING: {name} does not require a password."
+            )
+
+        # Check for accounts with no recorded logon
+        if enabled and not account.get("LastLogon"):
+            findings.append(
+                f"REVIEW: {name} has no recorded last logon."
+            )
+
+        # Identify administrator accounts
+        for admin in administrators:
+            if isinstance(admin, str):
+                if admin.split("\\")[-1] == name:
+                    findings.append(
+                        f"REVIEW: {name} has administrator access."
+                    )
+
+    print("\nCompliance Results")
+    print("------------------")
+
+    if findings:
+        for finding in findings:
+            print(finding)
+        print("\nStatus: MANUAL REVIEW REQUIRED")
+    else:
+        print("No issues found in the automated checks.")
+        print("Status: PARTIAL CHECKS PASSED")
+
+
+if __name__ == "__main__":
+    try:
+        check_accounts()
+    except Exception as error:
+        print(f"Error running compliance check: {error}")
