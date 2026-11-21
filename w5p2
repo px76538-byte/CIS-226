@@ -1,0 +1,101 @@
+
+import subprocess
+import os
+import shutil
+from datetime import datetime
+
+# SCAP Security Compliance Scanner
+
+SCAP_FILE = "security_policy.xml"
+REPORT_FILE = "scap_report.html"
+RESULT_FILE = "scap_results.xml"
+
+
+def check_openscap():
+    """Check whether OpenSCAP is installed."""
+    if shutil.which("oscap") is None:
+        print("ERROR: OpenSCAP is not installed.")
+        print("Install OpenSCAP before continuing.")
+        return False
+
+    print("PASS: OpenSCAP is installed.")
+    return True
+
+
+def check_scap_file():
+    """Verify that the SCAP policy file exists."""
+    if not os.path.isfile(SCAP_FILE):
+        print(f"ERROR: {SCAP_FILE} not found.")
+        return False
+
+    print("PASS: SCAP policy file found.")
+    return True
+
+
+def run_scap_scan():
+    """Execute the OpenSCAP compliance assessment."""
+
+    print("\nStarting SCAP Security Analysis...")
+    print("--------------------------------")
+
+    command = [
+        "oscap",
+        "xccdf",
+        "eval",
+        "--results", RESULT_FILE,
+        "--report", REPORT_FILE,
+        SCAP_FILE
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=600
+        )
+
+        if result.stdout:
+            print(result.stdout)
+
+        if result.stderr:
+            print(result.stderr)
+
+        # OpenSCAP: 0 = success, 2 = compliance
+        # findings, 1 = execution error.
+        if result.returncode == 0:
+            print("\nSCAN COMPLETED: No failed rules.")
+        elif result.returncode == 2:
+            print("\nSCAN COMPLETED: Findings detected.")
+        else:
+            print("\nERROR: SCAP scan failed.")
+            return
+
+        print(f"\nResults: {RESULT_FILE}")
+        print(f"HTML Report: {REPORT_FILE}")
+
+    except subprocess.TimeoutExpired:
+        print("ERROR: Scan exceeded time limit.")
+
+    except Exception as error:
+        print(f"ERROR: {error}")
+
+
+def main():
+    print("=" * 50)
+    print("SCAP SECURITY COMPLIANCE ANALYSIS")
+    print("=" * 50)
+
+    print("Scan Date:", datetime.now())
+
+    if not check_openscap():
+        return
+
+    if not check_scap_file():
+        return
+
+    run_scap_scan()
+
+
+if __name__ == "__main__":
+    main()
